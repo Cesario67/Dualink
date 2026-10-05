@@ -13,8 +13,10 @@ const REPORT_ID_BT_FULL: u8 = 0x31;
 /// Rapport de calibration : le lire fait basculer la manette Bluetooth en mode complet.
 const FEATURE_REPORT_CALIBRATION: u8 = 0x05;
 
+pub const STICK_CENTER: u8 = 128;
+
 /// État d'entrée décodé, indépendant du transport.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DualSenseState {
     pub left_x: u8,
     pub left_y: u8,
@@ -37,6 +39,35 @@ pub struct DualSenseState {
     pub l3: bool,
     pub r3: bool,
     pub ps: bool,
+}
+
+/// État au repos : sticks centrés, rien d'appuyé.
+impl Default for DualSenseState {
+    fn default() -> Self {
+        Self {
+            left_x: STICK_CENTER,
+            left_y: STICK_CENTER,
+            right_x: STICK_CENTER,
+            right_y: STICK_CENTER,
+            l2: 0,
+            r2: 0,
+            dpad_up: false,
+            dpad_down: false,
+            dpad_left: false,
+            dpad_right: false,
+            square: false,
+            cross: false,
+            circle: false,
+            triangle: false,
+            l1: false,
+            r1: false,
+            create: false,
+            options: false,
+            l3: false,
+            r3: false,
+            ps: false,
+        }
+    }
 }
 
 pub struct DualSense {
