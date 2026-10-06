@@ -4,6 +4,7 @@ use eframe::egui::{self, Color32};
 
 use crate::bridge::{Bridge, Status};
 use crate::hidhide::HidHideState;
+use crate::virtual_pad::Emulation;
 use crate::widgets::{chip, status_dot, stick, trigger};
 
 pub struct DualinkApp {
@@ -24,10 +25,11 @@ impl eframe::App for DualinkApp {
 
         egui::CentralPanel::default().show(ui, |ui| {
             ui.heading("Dualink");
-            ui.label("DualSense vers manette Xbox 360 virtuelle");
+            ui.label("Utilisez votre DualSense comme une manette Xbox 360 ou DualShock 4");
             ui.add_space(8.0);
 
-            let (color, text) = describe(&snapshot.status);
+            let mut mode = self.bridge.emulation();
+            let (color, text) = describe(&snapshot.status, mode);
             ui.horizontal(|ui| {
                 status_dot(ui, color);
                 ui.label(text);
@@ -36,6 +38,18 @@ impl eframe::App for DualinkApp {
             let mut enabled = self.bridge.is_enabled();
             if ui.checkbox(&mut enabled, "Activer l'émulation").changed() {
                 self.bridge.set_enabled(enabled);
+            }
+
+            ui.horizontal(|ui| {
+                ui.label("Émuler :");
+                let xbox = ui.radio_value(&mut mode, Emulation::Xbox360, Emulation::Xbox360.label());
+                let ds4 = ui.radio_value(&mut mode, Emulation::DualShock4, Emulation::DualShock4.label());
+                if xbox.changed() || ds4.changed() {
+                    self.bridge.set_emulation(mode);
+                }
+            });
+            if mode == Emulation::DualShock4 {
+                ui.weak("Pas de vibration en mode DualShock 4 pour l'instant.");
             }
 
             show_hidhide(ui, &self.bridge, &snapshot.hidhide);
@@ -103,9 +117,12 @@ fn show_hidhide(ui: &mut egui::Ui, bridge: &Bridge, state: &HidHideState) {
     });
 }
 
-fn describe(status: &Status) -> (Color32, String) {
+fn describe(status: &Status, mode: Emulation) -> (Color32, String) {
     match status {
-        Status::Active => (Color32::from_rgb(60, 180, 90), "Active : manette Xbox 360 virtuelle branchée".into()),
+        Status::Active => (
+            Color32::from_rgb(60, 180, 90),
+            format!("Active : manette {} virtuelle branchée", mode.label()),
+        ),
         Status::WaitingForController => {
             (Color32::from_rgb(230, 170, 40), "En attente d'une DualSense (USB ou Bluetooth)".into())
         }

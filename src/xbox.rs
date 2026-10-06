@@ -1,11 +1,16 @@
 //! Manette Xbox 360 virtuelle (ViGEmBus) et conversion depuis l'état DualSense.
 
+use std::sync::mpsc::{self, Receiver};
+
 use vigem_client::{Client, TargetId, XButtons, XGamepad, Xbox360Wired};
 
 use crate::dualsense::DualSenseState;
+use crate::virtual_pad::Rumble;
 
 pub struct VirtualXbox360 {
     target: Xbox360Wired<Client>,
+    /// Ordres de vibration envoyés par les jeux, reçus sur un thread géré par vigem-client.
+    rumble: Receiver<Rumble>,
 }
 
 impl VirtualXbox360 {
@@ -20,7 +25,25 @@ impl VirtualXbox360 {
         target
             .wait_ready()
             .map_err(|e| format!("manette virtuelle non prête : {e:?}"))?;
-        Ok(Self { target })
+
+        // Le thread s'arrête tout seul quand la cible est débranchée (drop de `target`).
+        let (tx, rumble) = mpsc::channel();
+        target
+            .request_notification()
+            .map_err(|e| format!("abonnement à la vibration : {e:?}"))?
+            .spawn_thread(move |_, notification| {
+                let _ = tx.send(Rumble {
+                    large: notification.large_motor,
+                    small: notification.small_motor,
+                });
+            });
+
+        Ok(Self { target, rumble })
+    }
+
+    /// Dernier ordre de vibration reçu depuis le dernier appel.
+    pub fn take_rumble(&mut self) -> Option<Rumble> {
+        self.rumble.try_iter().last()
     }
 
     pub fn send(&mut self, state: &DualSenseState) -> Result<(), String> {

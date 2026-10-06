@@ -1,6 +1,10 @@
 //! Lecture de la DualSense en HID brut (USB et Bluetooth) et décodage des rapports d'entrée.
 
-use hidapi::{HidApi, HidDevice};
+use std::cell::Cell;
+
+use hidapi::{BusType, HidApi, HidDevice};
+
+use crate::output_report::{rumble_report, Transport};
 
 const SONY_VID: u16 = 0x054C;
 const DUALSENSE_PID: u16 = 0x0CE6;
@@ -39,6 +43,7 @@ pub struct DualSenseState {
     pub l3: bool,
     pub r3: bool,
     pub ps: bool,
+    pub touchpad: bool,
 }
 
 /// État au repos : sticks centrés, rien d'appuyé.
@@ -66,12 +71,16 @@ impl Default for DualSenseState {
             l3: false,
             r3: false,
             ps: false,
+            touchpad: false,
         }
     }
 }
 
 pub struct DualSense {
     device: HidDevice,
+    transport: Transport,
+    /// Compteur de rapports de sortie Bluetooth (4 bits).
+    bt_seq: Cell<u8>,
 }
 
 impl DualSense {
@@ -85,6 +94,10 @@ impl DualSense {
             })
             .ok_or("aucune DualSense détectée (branchez-la en USB ou appairez-la en Bluetooth)")?;
 
+        let transport = match info.bus_type() {
+            BusType::Bluetooth => Transport::Bluetooth,
+            _ => Transport::Usb,
+        };
         let device = info
             .open_device(api)
             .map_err(|e| format!("ouverture de la manette impossible : {e}"))?;
@@ -94,7 +107,17 @@ impl DualSense {
         buf[0] = FEATURE_REPORT_CALIBRATION;
         let _ = device.get_feature_report(&mut buf);
 
-        Ok(Self { device })
+        Ok(Self { device, transport, bt_seq: Cell::new(0) })
+    }
+
+    /// Fait vibrer la manette : `left` gros moteur, `right` petit moteur (0 = arrêt).
+    pub fn set_rumble(&self, left: u8, right: u8) -> Result<(), String> {
+        let seq = self.bt_seq.get();
+        self.bt_seq.set(seq.wrapping_add(1) & 0x0F);
+        self.device
+            .write(&rumble_report(self.transport, seq, left, right))
+            .map(|_| ())
+            .map_err(|e| format!("écriture HID : {e}"))
     }
 
     /// Attend un rapport d'entrée. `Ok(None)` si le délai expire ou si le rapport est inconnu.
@@ -105,6 +128,13 @@ impl DualSense {
             .read_timeout(&mut buf, timeout_ms)
             .map_err(|e| format!("lecture HID : {e}"))?;
         Ok(parse_report(&buf[..len]))
+    }
+}
+
+impl Drop for DualSense {
+    /// Ne jamais laisser la manette vibrer après la fermeture ou la déconnexion.
+    fn drop(&mut self) {
+        let _ = self.set_rumble(0, 0);
     }
 }
 
@@ -177,6 +207,7 @@ fn build_state(sticks: [u8; 4], l2: u8, r2: u8, buttons: [u8; 3]) -> DualSenseSt
         l3: has(shoulder, 0x40),
         r3: has(shoulder, 0x80),
         ps: has(system, 0x01),
+        touchpad: has(system, 0x02),
     }
 }
 

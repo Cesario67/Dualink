@@ -2,8 +2,11 @@
 
 mod app;
 mod bridge;
+mod ds4;
 mod dualsense;
 mod hidhide;
+mod output_report;
+mod virtual_pad;
 mod widgets;
 mod xbox;
 

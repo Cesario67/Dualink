@@ -2,7 +2,7 @@
 //! consultable par l'interface. Gère la reconnexion, l'activation/désactivation et le
 //! masquage de la vraie manette via HidHide.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -11,7 +11,7 @@ use hidapi::HidApi;
 
 use crate::dualsense::{DualSense, DualSenseState};
 use crate::hidhide::{HidHide, HidHideState};
-use crate::xbox::VirtualXbox360;
+use crate::virtual_pad::{Emulation, VirtualPad};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Status {
@@ -33,6 +33,7 @@ struct Shared {
     snapshot: Mutex<Snapshot>,
     enabled: AtomicBool,
     hide_wanted: AtomicBool,
+    emulation: AtomicU8,
     quit: AtomicBool,
 }
 
@@ -58,6 +59,7 @@ impl Bridge {
             }),
             enabled: AtomicBool::new(true),
             hide_wanted: AtomicBool::new(true),
+            emulation: AtomicU8::new(Emulation::Xbox360.to_u8()),
             quit: AtomicBool::new(false),
         });
         let worker_shared = Arc::clone(&shared);
@@ -83,6 +85,14 @@ impl Bridge {
 
     pub fn set_hide_wanted(&self, wanted: bool) {
         self.shared.hide_wanted.store(wanted, Ordering::Relaxed);
+    }
+
+    pub fn emulation(&self) -> Emulation {
+        Emulation::from_u8(self.shared.emulation.load(Ordering::Relaxed))
+    }
+
+    pub fn set_emulation(&self, mode: Emulation) {
+        self.shared.emulation.store(mode.to_u8(), Ordering::Relaxed);
     }
 }
 
@@ -159,7 +169,7 @@ fn run(shared: &Shared, notify: &dyn Fn()) {
     };
 
     let mut pad: Option<DualSense> = None;
-    let mut virtual_pad: Option<VirtualXbox360> = None;
+    let mut virtual_pad: Option<VirtualPad> = None;
     let mut last_sent: Option<DualSenseState> = None;
 
     while !shared.quit.load(Ordering::Relaxed) {
@@ -187,10 +197,20 @@ fn run(shared: &Shared, notify: &dyn Fn()) {
             }
         }
 
-        // La manette virtuelle n'existe que tant que la vraie est là : pas de fantôme Xbox.
+        // Changement de mode demandé : on débranche la manette virtuelle pour la recréer.
+        let mode = Emulation::from_u8(shared.emulation.load(Ordering::Relaxed));
+        if virtual_pad.as_ref().is_some_and(|v| v.mode() != mode) {
+            virtual_pad = None;
+            last_sent = None;
+            if let Some(device) = &pad {
+                let _ = device.set_rumble(0, 0);
+            }
+        }
+
+        // La manette virtuelle n'existe que tant que la vraie est là : pas de fantôme.
         if virtual_pad.is_none() {
             hider.sync(false);
-            match VirtualXbox360::plug_in() {
+            match VirtualPad::plug_in(mode) {
                 Ok(plugged) => virtual_pad = Some(plugged),
                 Err(e) => {
                     publish(shared, notify, &hider, Status::ViGemUnavailable(e), idle);
@@ -225,7 +245,15 @@ fn run(shared: &Shared, notify: &dyn Fn()) {
                 last_sent = None;
                 hider.sync(false);
                 publish(shared, notify, &hider, Status::WaitingForController, idle);
+                continue;
             }
+        }
+
+        // Vibration demandée par le jeu : on la relaie à la vraie manette.
+        if let (Some(device), Some(rumble)) =
+            (pad.as_ref(), virtual_pad.as_mut().and_then(VirtualPad::take_rumble))
+        {
+            let _ = device.set_rumble(rumble.large, rumble.small);
         }
     }
 
