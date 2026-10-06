@@ -3,6 +3,7 @@
 use eframe::egui::{self, Color32};
 
 use crate::bridge::{Bridge, Status};
+use crate::hidhide::HidHideState;
 use crate::widgets::{chip, status_dot, stick, trigger};
 
 pub struct DualinkApp {
@@ -36,6 +37,8 @@ impl eframe::App for DualinkApp {
             if ui.checkbox(&mut enabled, "Activer l'émulation").changed() {
                 self.bridge.set_enabled(enabled);
             }
+
+            show_hidhide(ui, &self.bridge, &snapshot.hidhide);
 
             ui.separator();
 
@@ -72,6 +75,32 @@ impl eframe::App for DualinkApp {
             });
         });
     }
+}
+
+/// Case « masquer la DualSense » et état de HidHide.
+fn show_hidhide(ui: &mut egui::Ui, bridge: &Bridge, state: &HidHideState) {
+    let installed = *state != HidHideState::NotInstalled;
+    let mut wanted = bridge.is_hide_wanted();
+    let changed = ui
+        .add_enabled(
+            installed,
+            egui::Checkbox::new(&mut wanted, "Masquer la vraie DualSense aux autres applications (HidHide)"),
+        )
+        .changed();
+    if changed {
+        bridge.set_hide_wanted(wanted);
+    }
+
+    let (color, text) = match state {
+        HidHideState::NotInstalled => (Color32::GRAY, "HidHide n'est pas installé : option indisponible".to_owned()),
+        HidHideState::Off => (Color32::GRAY, "Manette visible par les autres applications".to_owned()),
+        HidHideState::Hidden => (Color32::from_rgb(60, 180, 90), "Manette masquée, Dualink la voit toujours".to_owned()),
+        HidHideState::Error(e) => (Color32::from_rgb(210, 70, 70), e.clone()),
+    };
+    ui.horizontal_wrapped(|ui| {
+        ui.add_space(22.0);
+        ui.colored_label(color, text);
+    });
 }
 
 fn describe(status: &Status) -> (Color32, String) {

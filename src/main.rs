@@ -3,6 +3,7 @@
 mod app;
 mod bridge;
 mod dualsense;
+mod hidhide;
 mod widgets;
 mod xbox;
 

@@ -1,5 +1,6 @@
 //! Thread de fond : lit la DualSense, alimente la manette virtuelle et publie un état
-//! consultable par l'interface. Gère la reconnexion et l'activation/désactivation.
+//! consultable par l'interface. Gère la reconnexion, l'activation/désactivation et le
+//! masquage de la vraie manette via HidHide.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -9,6 +10,7 @@ use std::time::Duration;
 use hidapi::HidApi;
 
 use crate::dualsense::{DualSense, DualSenseState};
+use crate::hidhide::{HidHide, HidHideState};
 use crate::xbox::VirtualXbox360;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,11 +26,13 @@ pub enum Status {
 pub struct Snapshot {
     pub status: Status,
     pub input: DualSenseState,
+    pub hidhide: HidHideState,
 }
 
 struct Shared {
     snapshot: Mutex<Snapshot>,
     enabled: AtomicBool,
+    hide_wanted: AtomicBool,
     quit: AtomicBool,
 }
 
@@ -50,8 +54,10 @@ impl Bridge {
             snapshot: Mutex::new(Snapshot {
                 status: Status::WaitingForController,
                 input: DualSenseState::default(),
+                hidhide: HidHideState::Off,
             }),
             enabled: AtomicBool::new(true),
+            hide_wanted: AtomicBool::new(true),
             quit: AtomicBool::new(false),
         });
         let worker_shared = Arc::clone(&shared);
@@ -70,6 +76,14 @@ impl Bridge {
     pub fn set_enabled(&self, enabled: bool) {
         self.shared.enabled.store(enabled, Ordering::Relaxed);
     }
+
+    pub fn is_hide_wanted(&self) -> bool {
+        self.shared.hide_wanted.load(Ordering::Relaxed)
+    }
+
+    pub fn set_hide_wanted(&self, wanted: bool) {
+        self.shared.hide_wanted.store(wanted, Ordering::Relaxed);
+    }
 }
 
 impl Drop for Bridge {
@@ -81,9 +95,46 @@ impl Drop for Bridge {
     }
 }
 
+/// Pilote HidHide : masque ou restaure la manette selon ce qu'on lui demande.
+struct Hider {
+    hidhide: Option<HidHide>,
+    wanted: bool,
+    state: HidHideState,
+}
+
+impl Hider {
+    fn new() -> Self {
+        let mut hidhide = HidHide::detect();
+        let state = match hidhide.as_mut() {
+            None => HidHideState::NotInstalled,
+            Some(h) => match h.recover_leftover() {
+                Ok(()) => HidHideState::Off,
+                Err(e) => HidHideState::Error(e),
+            },
+        };
+        Self { hidhide, wanted: false, state }
+    }
+
+    /// Idempotent : ne relance HidHide que lorsque la demande change, pour ne pas lancer
+    /// le CLI en boucle (y compris après un échec, tant que la demande reste la même).
+    fn sync(&mut self, want_hidden: bool) {
+        let Some(hidhide) = self.hidhide.as_mut() else { return };
+        if self.wanted == want_hidden {
+            return;
+        }
+        self.wanted = want_hidden;
+        let result = if want_hidden { hidhide.apply() } else { hidhide.restore() };
+        self.state = match (result, want_hidden) {
+            (Ok(()), true) => HidHideState::Hidden,
+            (Ok(()), false) => HidHideState::Off,
+            (Err(e), _) => HidHideState::Error(e),
+        };
+    }
+}
+
 /// Met à jour l'état partagé et ne notifie que si quelque chose a changé.
-fn publish(shared: &Shared, notify: &dyn Fn(), status: Status, input: DualSenseState) {
-    let next = Snapshot { status, input };
+fn publish(shared: &Shared, notify: &dyn Fn(), hider: &Hider, status: Status, input: DualSenseState) {
+    let next = Snapshot { status, input, hidhide: hider.state.clone() };
     {
         let mut current = shared.lock();
         if *current == next {
@@ -95,11 +146,14 @@ fn publish(shared: &Shared, notify: &dyn Fn(), status: Status, input: DualSenseS
 }
 
 fn run(shared: &Shared, notify: &dyn Fn()) {
+    let mut hider = Hider::new();
+    let idle = DualSenseState::default();
+
     let mut api = match HidApi::new() {
         Ok(api) => api,
         Err(e) => {
             let status = Status::Error(format!("initialisation HID : {e}"));
-            publish(shared, notify, status, DualSenseState::default());
+            publish(shared, notify, &hider, status, idle);
             return;
         }
     };
@@ -107,25 +161,26 @@ fn run(shared: &Shared, notify: &dyn Fn()) {
     let mut pad: Option<DualSense> = None;
     let mut virtual_pad: Option<VirtualXbox360> = None;
     let mut last_sent: Option<DualSenseState> = None;
-    let idle = DualSenseState::default();
 
     while !shared.quit.load(Ordering::Relaxed) {
         if !shared.enabled.load(Ordering::Relaxed) {
             pad = None;
             virtual_pad = None;
             last_sent = None;
-            publish(shared, notify, Status::Disabled, idle);
+            hider.sync(false);
+            publish(shared, notify, &hider, Status::Disabled, idle);
             thread::sleep(Duration::from_millis(100));
             continue;
         }
 
         if pad.is_none() {
+            hider.sync(false);
             // Sans rafraîchissement, hidapi ne voit pas une manette branchée après son démarrage.
             let _ = api.refresh_devices();
             match DualSense::open(&api) {
                 Ok(opened) => pad = Some(opened),
                 Err(_) => {
-                    publish(shared, notify, Status::WaitingForController, idle);
+                    publish(shared, notify, &hider, Status::WaitingForController, idle);
                     thread::sleep(Duration::from_millis(500));
                     continue;
                 }
@@ -134,22 +189,26 @@ fn run(shared: &Shared, notify: &dyn Fn()) {
 
         // La manette virtuelle n'existe que tant que la vraie est là : pas de fantôme Xbox.
         if virtual_pad.is_none() {
+            hider.sync(false);
             match VirtualXbox360::plug_in() {
                 Ok(plugged) => virtual_pad = Some(plugged),
                 Err(e) => {
-                    publish(shared, notify, Status::ViGemUnavailable(e), idle);
+                    publish(shared, notify, &hider, Status::ViGemUnavailable(e), idle);
                     thread::sleep(Duration::from_secs(1));
                     continue;
                 }
             }
         }
 
+        // On ne masque qu'une fois la manette ouverte et la virtuelle branchée.
+        hider.sync(shared.hide_wanted.load(Ordering::Relaxed));
+
         let (Some(device), Some(out)) = (pad.as_ref(), virtual_pad.as_mut()) else {
             continue;
         };
         match device.read_state(100) {
             Ok(Some(state)) => {
-                publish(shared, notify, Status::Active, state);
+                publish(shared, notify, &hider, Status::Active, state);
                 if last_sent != Some(state) {
                     if out.send(&state).is_err() {
                         virtual_pad = None;
@@ -164,8 +223,12 @@ fn run(shared: &Shared, notify: &dyn Fn()) {
                 pad = None;
                 virtual_pad = None;
                 last_sent = None;
-                publish(shared, notify, Status::WaitingForController, idle);
+                hider.sync(false);
+                publish(shared, notify, &hider, Status::WaitingForController, idle);
             }
         }
     }
+
+    // Fermeture : la DualSense redevient visible pour les autres applications.
+    hider.sync(false);
 }
