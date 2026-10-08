@@ -1,0 +1,39 @@
+﻿name: Release
+
+# Publie une release à chaque tag vX.Y.Z : compile Dualink, construit l'archive (avec les
+# installateurs ViGEmBus et HidHide vérifiés par SHA256) et la joint à la release.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Vérifier que le tag correspond à la version de Cargo.toml
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+          if ("v$version" -ne $env:GITHUB_REF_NAME) { throw "Le tag $env:GITHUB_REF_NAME ne correspond pas à la version $version de Cargo.toml" }
+
+      - name: Tests
+        run: cargo test --release
+
+      - name: Construire l'archive
+        shell: pwsh
+        run: ./scripts/package-release.ps1
+
+      - name: Publier la release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $notes = "docs/release-notes/$env:GITHUB_REF_NAME.md"
+          if (-not (Test-Path $notes)) { throw "Texte de release introuvable : $notes" }
+          gh release create $env:GITHUB_REF_NAME (Get-ChildItem dist/*.zip) dist/SHA256SUMS.txt `
+            --title "Dualink $env:GITHUB_REF_NAME" --notes-file $notes --prerelease
