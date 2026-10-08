@@ -4,12 +4,13 @@
 # Les installateurs sont téléchargés depuis les dépôts officiels et vérifiés par leur SHA256
 # (empreintes de leurs manifestes winget). Rien d'autre n'est modifié sur la machine.
 #
-# Utilisation : powershell -ExecutionPolicy Bypass -File scripts\package-release.ps1 [-Version 0.1.0]
+# Utilisation : powershell -ExecutionPolicy Bypass -File scripts\package-release.ps1 [-Version <x.y.z>]  (par défaut : la version de Cargo.toml)
 
-param([string]$Version = '0.1.0')
+param([string]$Version = '')
 
 $ErrorActionPreference = 'Stop'
 $root  = Split-Path $PSScriptRoot -Parent
+if (-not $Version) { $Version = (Select-String -Path (Join-Path $root 'Cargo.toml') -Pattern '^version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value }
 $dist  = Join-Path $root 'dist'
 $cache = Join-Path $dist 'cache'
 $name  = "Dualink-v$Version-windows-x64"
