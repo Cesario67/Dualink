@@ -33,10 +33,28 @@ accès déjà pris.
 
 ## Prérequis
 
-- Windows
-- [ViGEmBus](https://github.com/nefarius/ViGEmBus/releases) installé (projet archivé par son auteur,
-  mais toujours fonctionnel)
-- Rust (édition 2024)
+| Composant | Rôle | Obligatoire |
+|---|---|---|
+| Windows 10 ou 11 (64 bits) | La DualSense n'a besoin d'aucun pilote : Windows la gère en USB et en Bluetooth | oui |
+| [Runtime Visual C++ 2015-2022 (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe) | Nécessaire pour lancer l'exécutable (compilé avec MSVC) | oui |
+| [ViGEmBus](https://github.com/nefarius/ViGEmBus/releases) | Pilote qui crée les manettes virtuelles Xbox 360 / DualShock 4 (projet archivé par son auteur, mais toujours fonctionnel) | oui |
+| [HidHide](https://github.com/nefarius/HidHide/releases) | Masque la vraie DualSense aux autres applications (évite les doublons dans Steam et les jeux) | non |
+| Un pilote graphique avec OpenGL | Affichage de la fenêtre (egui) ; une machine virtuelle sans accélération peut poser problème | oui |
+| Rust (édition 2024) | Uniquement pour compiler depuis les sources | non |
+
+### Installation de ViGEmBus et HidHide en un clic
+
+Si l'un des deux manque, Dualink affiche un panneau « Composants manquants » avec un bouton
+**Installer en un clic**. Il lance une copie de Dualink avec les droits administrateur (une seule
+invite d'autorisation Windows), qui installe ce qui manque en silencieux via `winget` (présent sur
+Windows 10/11 récents) : `ViGEm.ViGEmBus` et `Nefarius.HidHide`. Dualink détecte ensuite tout seul
+l'installation terminée. HidHide peut demander un redémarrage. La sortie de winget est conservée
+dans `%LOCALAPPDATA%\Dualink\install.log`.
+
+Sans winget, installez les composants à la main depuis les liens ci-dessus.
+
+Le runtime Visual C++ n'est pas installé par ce bouton (il faut déjà l'avoir pour lancer Dualink) :
+`winget install --id Microsoft.VCRedist.2015+.x64 --exact` ou le lien du tableau.
 
 ## Utilisation
 
@@ -52,6 +70,8 @@ cargo run --release
 - `src/xbox.rs`, `src/ds4.rs` : manettes virtuelles et mapping DualSense vers Xbox 360 / DualShock 4
 - `src/bridge.rs` : thread de fond, état partagé, reconnexion
 - `src/hidhide.rs` : masquage de la DualSense via HidHideCLI, journal de restauration
+- `src/elevate.rs`, `src/reset.rs`, `src/deps.rs` : actions ponctuelles en administrateur (réinitialiser la
+  manette, installer ViGEmBus et HidHide)
 - `src/app.rs`, `src/widgets.rs` : interface
 
 ## Limites actuelles
@@ -60,6 +80,8 @@ cargo run --release
   avec une vraie manette. La vibration Bluetooth n'a jamais été essayée.
 - Pas de vibration en mode DualShock 4 : `vigem-client` n'expose pas les notifications de vibration
   de la DS4.
+- L'installation en un clic et le bouton « Réinitialiser la manette » n'ont pas été essayés de bout en
+  bout (ils passent par une invite administrateur). Sur un Windows vierge, rien n'a été testé.
 - Gyroscope et gâchettes adaptatives ignorés ; pas de pavé tactile en mode Xbox.
 
 ## Tests

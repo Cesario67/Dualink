@@ -2,8 +2,10 @@
 
 mod app;
 mod bridge;
+mod deps;
 mod ds4;
 mod dualsense;
+mod elevate;
 mod hidhide;
 mod output_report;
 mod reset;
@@ -14,9 +16,11 @@ mod xbox;
 use eframe::egui;
 
 fn main() -> eframe::Result {
-    // Copie élevée lancée par le bouton « Réinitialiser la manette » : pas de fenêtre.
-    if std::env::args().nth(1).as_deref() == Some(reset::RESET_ARG) {
-        std::process::exit(reset::run_elevated_helper());
+    // Copies élevées lancées par l'interface (invite UAC) : pas de fenêtre.
+    match std::env::args().nth(1).as_deref() {
+        Some(reset::RESET_ARG) => std::process::exit(reset::run_elevated_helper()),
+        Some(deps::INSTALL_ARG) => std::process::exit(deps::run_elevated_helper()),
+        _ => {}
     }
 
     let options = eframe::NativeOptions {

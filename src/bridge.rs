@@ -5,13 +5,16 @@
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use hidapi::HidApi;
 
 use crate::dualsense::{DualSense, DualSenseState};
 use crate::hidhide::{HidHide, HidHideState};
 use crate::virtual_pad::{Emulation, VirtualPad};
+
+/// Intervalle de recherche de HidHide tant qu'il n'est pas installé.
+const DETECTION_INTERVAL: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Status {
@@ -110,19 +113,40 @@ struct Hider {
     hidhide: Option<HidHide>,
     wanted: bool,
     state: HidHideState,
+    last_detection: Instant,
 }
 
 impl Hider {
     fn new() -> Self {
-        let mut hidhide = HidHide::detect();
-        let state = match hidhide.as_mut() {
+        let mut hider = Self {
+            hidhide: None,
+            wanted: false,
+            state: HidHideState::NotInstalled,
+            last_detection: Instant::now(),
+        };
+        hider.detect();
+        hider
+    }
+
+    /// Cherche HidHide et défait les restes d'une exécution précédente interrompue.
+    fn detect(&mut self) {
+        self.last_detection = Instant::now();
+        self.hidhide = HidHide::detect();
+        self.state = match self.hidhide.as_mut() {
             None => HidHideState::NotInstalled,
             Some(h) => match h.recover_leftover() {
                 Ok(()) => HidHideState::Off,
                 Err(e) => HidHideState::Error(e),
             },
         };
-        Self { hidhide, wanted: false, state }
+    }
+
+    /// Tant que HidHide est absent, le cherche de temps en temps : l'utilisateur peut l'installer
+    /// pendant que Dualink tourne.
+    fn poll_installation(&mut self) {
+        if self.hidhide.is_none() && self.last_detection.elapsed() >= DETECTION_INTERVAL {
+            self.detect();
+        }
     }
 
     /// Demande de réappliquer le masquage au prochain `sync(true)` (opération idempotente).
@@ -178,6 +202,8 @@ fn run(shared: &Shared, notify: &dyn Fn()) {
     let mut last_sent: Option<DualSenseState> = None;
 
     while !shared.quit.load(Ordering::Relaxed) {
+        hider.poll_installation();
+
         // Le masquage suit la case HidHide et la durée de vie de Dualink, pas l'interrupteur
         // d'émulation : démasquer le temps d'une pause laisserait Steam reprendre la manette.
         if !shared.hide_wanted.load(Ordering::Relaxed) {
