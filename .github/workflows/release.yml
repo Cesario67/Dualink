@@ -1,7 +1,8 @@
-﻿name: Release
+name: Release
 
 # Publie une release à chaque tag vX.Y.Z : compile Dualink, construit l'archive (avec les
-# installateurs ViGEmBus et HidHide vérifiés par SHA256) et la joint à la release.
+# installateurs ViGEmBus et HidHide vérifiés par SHA256), construit l'installateur Inno Setup et joint
+# le tout à la release.
 on:
   push:
     tags: ['v*']
@@ -24,7 +25,11 @@ jobs:
       - name: Tests
         run: cargo test --release
 
-      - name: Construire l'archive
+      - name: Installer Inno Setup
+        shell: pwsh
+        run: choco install innosetup --yes --no-progress
+
+      - name: Construire l'installateur et l'archive
         shell: pwsh
         run: ./scripts/package-release.ps1
 
@@ -35,5 +40,7 @@ jobs:
         run: |
           $notes = "docs/release-notes/$env:GITHUB_REF_NAME.md"
           if (-not (Test-Path $notes)) { throw "Texte de release introuvable : $notes" }
-          gh release create $env:GITHUB_REF_NAME (Get-ChildItem dist/*.zip) dist/SHA256SUMS.txt `
+          $setup = Get-ChildItem dist/Dualink-Setup-*.exe
+          if (-not $setup) { throw "Installateur introuvable dans dist/" }
+          gh release create $env:GITHUB_REF_NAME $setup (Get-ChildItem dist/*.zip) dist/SHA256SUMS.txt `
             --title "Dualink $env:GITHUB_REF_NAME" --notes-file $notes --prerelease

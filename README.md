@@ -31,12 +31,17 @@ lancement défait les changements. HidHide reste optionnel.
 Lancez Dualink avant Steam et les jeux : HidHide empêche d'ouvrir la manette, il ne ferme pas les
 accès déjà pris.
 
+## Installation (utilisateurs)
+
+Téléchargez `Dualink-Setup-v<version>.exe` depuis les [releases](https://github.com/Cesario67/Dualink/releases) et lancez-le. Il vérifie ViGEmBus (obligatoire) et HidHide (recommandé), installe ceux qui manquent à partir des installateurs officiels qu'il embarque (aucune connexion Internet nécessaire), puis installe Dualink avec ses raccourcis et un désinstalleur. À la désinstallation, Dualink est retiré de la liste de HidHide ; les pilotes restent en place.
+
+Le runtime Visual C++ n'est **pas** nécessaire : l'exécutable est compilé avec le runtime C intégré (`.cargo/config.toml`).
+
 ## Prérequis
 
 | Composant | Rôle | Obligatoire |
 |---|---|---|
 | Windows 10 ou 11 (64 bits) | La DualSense n'a besoin d'aucun pilote : Windows la gère en USB et en Bluetooth | oui |
-| [Runtime Visual C++ 2015-2022 (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe) | Nécessaire pour lancer l'exécutable (compilé avec MSVC) | oui |
 | [ViGEmBus](https://github.com/nefarius/ViGEmBus/releases) | Pilote qui crée les manettes virtuelles Xbox 360 / DualShock 4 (projet archivé par son auteur, mais toujours fonctionnel) | oui |
 | [HidHide](https://github.com/nefarius/HidHide/releases) | Masque la vraie DualSense aux autres applications (évite les doublons dans Steam et les jeux) | non |
 | Un pilote graphique avec OpenGL | Affichage de la fenêtre (egui) ; une machine virtuelle sans accélération peut poser problème | oui |
@@ -56,22 +61,17 @@ Dualink détecte ensuite tout seul l'installation terminée. HidHide peut demand
 traces sont dans `%LOCALAPPDATA%\Dualink\install.log`. Sans `redist\` ni winget, installez les
 composants à la main depuis les liens ci-dessus.
 
-## Archive de release
+## Construire les fichiers de release
 
-`scripts\package-release.ps1` construit `dist\Dualink-v<version>-windows-x64.zip` : `dualink.exe`,
-`redist\` (installateurs ViGEmBus 1.22.0 et HidHide 1.5.230, téléchargés depuis les dépôts officiels
-et vérifiés par leur SHA256), `THIRD_PARTY_NOTICES.txt` (licences BSD-3-Clause et MIT) et
-`dist\SHA256SUMS.txt`.
+`scripts\package-release.ps1` construit dans `dist\` : l'installateur `Dualink-Setup-v<version>.exe`(script Inno Setup dans `installer\dualink.iss`, nécessite [Inno Setup 6](https://jrsoftware.org/isinfo.php)), l'archive portable `Dualink-v<version>-windows-x64.zip` (`dualink.exe`, `redist\` avec les installateurs ViGEmBus 1.22.0 et HidHide 1.5.230 téléchargés depuis les dépôts officiels et vérifiés par leur SHA256, `THIRD_PARTY_NOTICES.txt` avec les licences BSD-3-Clause et MIT) et `SHA256SUMS.txt`. Sans Inno Setup, seule l'archive est produite.
 
 ```bash
 powershell -ExecutionPolicy Bypass -File scripts\package-release.ps1 -Version 0.1.0
 ```
 
 Pour mettre à jour un composant, changez l'URL et l'empreinte dans le script. Le dossier `dist\` n'est
-pas versionné : l'archive s'envoie comme fichier de release GitHub.
+pas versionné. Un tag `vX.Y.Z` (qui doit correspondre à la version de `Cargo.toml`) déclenche le workflow `.github/workflows/release.yml`, qui construit et publie la release.
 
-Le runtime Visual C++ n'est pas installé par ce bouton (il faut déjà l'avoir pour lancer Dualink) :
-`winget install --id Microsoft.VCRedist.2015+.x64 --exact` ou le lien du tableau.
 
 ## Utilisation
 
@@ -90,6 +90,7 @@ cargo run --release
 - `src/elevate.rs`, `src/reset.rs`, `src/deps.rs` : actions ponctuelles en administrateur (réinitialiser la
   manette, installer ViGEmBus et HidHide)
 - `src/app.rs`, `src/widgets.rs` : interface
+- `installer/dualink.iss` : script de l'installateur Inno Setup
 
 ## Limites actuelles
 

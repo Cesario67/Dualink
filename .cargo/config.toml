@@ -1,0 +1,3 @@
+﻿# Runtime C lié statiquement : l'exécutable ne dépend plus du runtime Visual C++ (vcruntime140.dll).
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
