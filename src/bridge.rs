@@ -125,6 +125,11 @@ impl Hider {
         Self { hidhide, wanted: false, state }
     }
 
+    /// Demande de réappliquer le masquage au prochain `sync(true)` (opération idempotente).
+    fn rescan(&mut self) {
+        self.wanted = false;
+    }
+
     /// Idempotent : ne relance HidHide que lorsque la demande change, pour ne pas lancer
     /// le CLI en boucle (y compris après un échec, tant que la demande reste la même).
     fn sync(&mut self, want_hidden: bool) {
@@ -173,22 +178,30 @@ fn run(shared: &Shared, notify: &dyn Fn()) {
     let mut last_sent: Option<DualSenseState> = None;
 
     while !shared.quit.load(Ordering::Relaxed) {
+        // Le masquage suit la case HidHide et la durée de vie de Dualink, pas l'interrupteur
+        // d'émulation : démasquer le temps d'une pause laisserait Steam reprendre la manette.
+        if !shared.hide_wanted.load(Ordering::Relaxed) {
+            hider.sync(false);
+        }
+
         if !shared.enabled.load(Ordering::Relaxed) {
             pad = None;
             virtual_pad = None;
             last_sent = None;
-            hider.sync(false);
             publish(shared, notify, &hider, Status::Disabled, idle);
             thread::sleep(Duration::from_millis(100));
             continue;
         }
 
         if pad.is_none() {
-            hider.sync(false);
             // Sans rafraîchissement, hidapi ne voit pas une manette branchée après son démarrage.
             let _ = api.refresh_devices();
             match DualSense::open(&api) {
-                Ok(opened) => pad = Some(opened),
+                Ok(opened) => {
+                    pad = Some(opened);
+                    // Une manette (re)branchée peut avoir un autre chemin d'instance : on le masque aussi.
+                    hider.rescan();
+                }
                 Err(_) => {
                     publish(shared, notify, &hider, Status::WaitingForController, idle);
                     thread::sleep(Duration::from_millis(500));
@@ -209,7 +222,6 @@ fn run(shared: &Shared, notify: &dyn Fn()) {
 
         // La manette virtuelle n'existe que tant que la vraie est là : pas de fantôme.
         if virtual_pad.is_none() {
-            hider.sync(false);
             match VirtualPad::plug_in(mode) {
                 Ok(plugged) => virtual_pad = Some(plugged),
                 Err(e) => {
@@ -243,7 +255,6 @@ fn run(shared: &Shared, notify: &dyn Fn()) {
                 pad = None;
                 virtual_pad = None;
                 last_sent = None;
-                hider.sync(false);
                 publish(shared, notify, &hider, Status::WaitingForController, idle);
                 continue;
             }

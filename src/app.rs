@@ -4,17 +4,20 @@ use eframe::egui::{self, Color32};
 
 use crate::bridge::{Bridge, Status};
 use crate::hidhide::HidHideState;
+use crate::reset;
 use crate::virtual_pad::Emulation;
 use crate::widgets::{chip, status_dot, stick, trigger};
 
 pub struct DualinkApp {
     bridge: Bridge,
+    /// Résultat de la dernière demande de réinitialisation de la manette.
+    reset_message: Option<Result<(), String>>,
 }
 
 impl DualinkApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let ctx = cc.egui_ctx.clone();
-        Self { bridge: Bridge::spawn(move || ctx.request_repaint()) }
+        Self { bridge: Bridge::spawn(move || ctx.request_repaint()), reset_message: None }
     }
 }
 
@@ -52,7 +55,7 @@ impl eframe::App for DualinkApp {
                 ui.weak("Pas de vibration en mode DualShock 4 pour l'instant.");
             }
 
-            show_hidhide(ui, &self.bridge, &snapshot.hidhide);
+            show_hidhide(ui, &self.bridge, &snapshot.hidhide, &mut self.reset_message);
 
             ui.separator();
 
@@ -92,7 +95,12 @@ impl eframe::App for DualinkApp {
 }
 
 /// Case « masquer la DualSense » et état de HidHide.
-fn show_hidhide(ui: &mut egui::Ui, bridge: &Bridge, state: &HidHideState) {
+fn show_hidhide(
+    ui: &mut egui::Ui,
+    bridge: &Bridge,
+    state: &HidHideState,
+    reset_message: &mut Option<Result<(), String>>,
+) {
     let installed = *state != HidHideState::NotInstalled;
     let mut wanted = bridge.is_hide_wanted();
     let changed = ui
@@ -114,6 +122,24 @@ fn show_hidhide(ui: &mut egui::Ui, bridge: &Bridge, state: &HidHideState) {
     ui.horizontal_wrapped(|ui| {
         ui.add_space(22.0);
         ui.colored_label(color, text);
+    });
+
+    // Équivalent d'un débranchement/rebranchement : les applications qui tenaient déjà la manette
+    // (Steam, un jeu) la perdent et ne la revoient plus, puisqu'elle est masquée.
+    ui.horizontal(|ui| {
+        ui.add_space(22.0);
+        let button = ui.add_enabled(installed, egui::Button::new("Réinitialiser la manette"));
+        if button
+            .on_hover_text("Redémarre la DualSense comme un débranchement/rebranchement (demande les droits administrateur)")
+            .clicked()
+        {
+            *reset_message = Some(reset::request_elevated());
+        }
+        match reset_message {
+            Some(Ok(())) => ui.weak("Demandé"),
+            Some(Err(e)) => ui.colored_label(Color32::from_rgb(210, 70, 70), e.as_str()),
+            None => ui.label(""),
+        };
     });
 }
 

@@ -38,6 +38,18 @@ impl Undo {
         self.registered_app.is_none() && self.hidden_devices.is_empty() && !self.cloak_turned_on
     }
 
+    fn merge(&mut self, other: Undo) {
+        if self.registered_app.is_none() {
+            self.registered_app = other.registered_app;
+        }
+        for device in other.hidden_devices {
+            if !contains_ignore_case(&self.hidden_devices, &device) {
+                self.hidden_devices.push(device);
+            }
+        }
+        self.cloak_turned_on |= other.cloak_turned_on;
+    }
+
     fn serialize(&self) -> String {
         let mut out = String::new();
         if let Some(app) = &self.registered_app {
@@ -86,6 +98,11 @@ impl HidHide {
         Some(Self { cli, journal, undo: Undo::default() })
     }
 
+    /// Chemins d'instance des interfaces de jeu des DualSense présentes (même format que HidHide).
+    pub fn dualsense_devices(&self) -> Result<Vec<String>, String> {
+        Ok(parse_dualsense_devices(&self.run(&["--dev-gaming"])?))
+    }
+
     /// Défait les changements d'une exécution précédente interrompue (plantage, arrêt forcé).
     pub fn recover_leftover(&mut self) -> Result<(), String> {
         if let Ok(text) = fs::read_to_string(&self.journal) {
@@ -128,7 +145,8 @@ impl HidHide {
         }
 
         // Journal d'abord : si on est tué entre les deux, le prochain lancement saura défaire.
-        self.undo = undo;
+        // On cumule avec les applications précédentes : `apply` peut être rappelée (manette rebranchée).
+        self.undo.merge(undo);
         self.write_journal();
         let refs: Vec<&str> = args.iter().map(String::as_str).collect();
         self.run(&refs).map(|_| ())
@@ -272,6 +290,20 @@ mod tests {
         let out = "--dev-hide \"HID\\VID_054C&PID_0CE6&MI_03\\8&3B&0&0000\"\n--dev-hide \"X\"\n";
         assert_eq!(parse_commands(out), vec![r"HID\VID_054C&PID_0CE6&MI_03\8&3B&0&0000", "X"]);
         assert!(parse_commands("--cloak-on").is_empty());
+    }
+
+    #[test]
+    fn merging_keeps_earlier_additions() {
+        let mut undo = Undo {
+            registered_app: Some("app".into()),
+            hidden_devices: vec![r"HID\A".into()],
+            cloak_turned_on: true,
+        };
+        // Deuxième application : l'appli et le masquage global étaient déjà en place, seul B est neuf.
+        undo.merge(Undo { registered_app: None, hidden_devices: vec![r"hid\a".into(), r"HID\B".into()], cloak_turned_on: false });
+        assert_eq!(undo.registered_app.as_deref(), Some("app"));
+        assert_eq!(undo.hidden_devices, vec![r"HID\A".to_owned(), r"HID\B".to_owned()]);
+        assert!(undo.cloak_turned_on);
     }
 
     #[test]

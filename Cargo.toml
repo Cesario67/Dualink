@@ -8,3 +8,4 @@ eframe = "0.36.2"
 hidapi = "2.6.7"
 serde_json = "1.0.151"
 vigem-client = { version = "0.1.4", features = ["unstable_ds4", "unstable_xtarget_notification"] }
+windows-sys = { version = "0.61", features = ["Win32_UI_Shell", "Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
