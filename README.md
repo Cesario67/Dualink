@@ -46,12 +46,29 @@ accès déjà pris.
 
 Si l'un des deux manque, Dualink affiche un panneau « Composants manquants » avec un bouton
 **Installer en un clic**. Il lance une copie de Dualink avec les droits administrateur (une seule
-invite d'autorisation Windows), qui installe ce qui manque en silencieux via `winget` (présent sur
-Windows 10/11 récents) : `ViGEm.ViGEmBus` et `Nefarius.HidHide`. Dualink détecte ensuite tout seul
-l'installation terminée. HidHide peut demander un redémarrage. La sortie de winget est conservée
-dans `%LOCALAPPDATA%\Dualink\install.log`.
+invite d'autorisation Windows), qui installe ce qui manque en silencieux :
 
-Sans winget, installez les composants à la main depuis les liens ci-dessus.
+1. depuis le dossier `redist\` situé à côté de `dualink.exe` s'il existe (archive de release :
+   **aucune connexion Internet nécessaire**) ;
+2. sinon via `winget` (présent sur Windows 10/11 récents) : `ViGEm.ViGEmBus` et `Nefarius.HidHide`.
+
+Dualink détecte ensuite tout seul l'installation terminée. HidHide peut demander un redémarrage. Les
+traces sont dans `%LOCALAPPDATA%\Dualink\install.log`. Sans `redist\` ni winget, installez les
+composants à la main depuis les liens ci-dessus.
+
+## Archive de release
+
+`scripts\package-release.ps1` construit `dist\Dualink-v<version>-windows-x64.zip` : `dualink.exe`,
+`redist\` (installateurs ViGEmBus 1.22.0 et HidHide 1.5.230, téléchargés depuis les dépôts officiels
+et vérifiés par leur SHA256), `THIRD_PARTY_NOTICES.txt` (licences BSD-3-Clause et MIT) et
+`dist\SHA256SUMS.txt`.
+
+```bash
+powershell -ExecutionPolicy Bypass -File scripts\package-release.ps1 -Version 0.1.0
+```
+
+Pour mettre à jour un composant, changez l'URL et l'empreinte dans le script. Le dossier `dist\` n'est
+pas versionné : l'archive s'envoie comme fichier de release GitHub.
 
 Le runtime Visual C++ n'est pas installé par ce bouton (il faut déjà l'avoir pour lancer Dualink) :
 `winget install --id Microsoft.VCRedist.2015+.x64 --exact` ou le lien du tableau.
@@ -80,8 +97,10 @@ cargo run --release
   avec une vraie manette. La vibration Bluetooth n'a jamais été essayée.
 - Pas de vibration en mode DualShock 4 : `vigem-client` n'expose pas les notifications de vibration
   de la DS4.
-- L'installation en un clic et le bouton « Réinitialiser la manette » n'ont pas été essayés de bout en
-  bout (ils passent par une invite administrateur). Sur un Windows vierge, rien n'a été testé.
+- L'installation en un clic (depuis `redist\` ou winget) et le bouton « Réinitialiser la manette » n'ont
+  pas été essayés de bout en bout (ils passent par une invite administrateur). Les options
+  d'installation silencieuse `/quiet /norestart` sont celles de WiX Burn, déduites de l'analyse des
+  installateurs, jamais exécutées. Sur un Windows vierge, rien n'a été testé.
 - Gyroscope et gâchettes adaptatives ignorés ; pas de pavé tactile en mode Xbox.
 
 ## Tests

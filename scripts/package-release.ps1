@@ -1,0 +1,86 @@
+﻿# Construit l'archive de release Dualink-v<version>-windows-x64.zip :
+#   dualink.exe, redist\ (ViGEmBus + HidHide), THIRD_PARTY_NOTICES.txt, SHA256SUMS.txt
+#
+# Les installateurs sont téléchargés depuis les dépôts officiels et vérifiés par leur SHA256
+# (empreintes de leurs manifestes winget). Rien d'autre n'est modifié sur la machine.
+#
+# Utilisation : powershell -ExecutionPolicy Bypass -File scripts\package-release.ps1 [-Version 0.1.0]
+
+param([string]$Version = '0.1.0')
+
+$ErrorActionPreference = 'Stop'
+$root  = Split-Path $PSScriptRoot -Parent
+$dist  = Join-Path $root 'dist'
+$cache = Join-Path $dist 'cache'
+$name  = "Dualink-v$Version-windows-x64"
+$stage = Join-Path $dist $name
+
+$components = @(
+    @{
+        Name    = 'ViGEmBus'
+        File    = 'ViGEmBus_1.22.0_x64_x86_arm64.exe'
+        Url     = 'https://github.com/nefarius/ViGEmBus/releases/download/v1.22.0/ViGEmBus_1.22.0_x64_x86_arm64.exe'
+        Sha256  = '89220a7865076b342892f98865f3499fb7c4cfd673159e89d352c360fd014c6a'
+        License = 'BSD-3-Clause'
+        LicenseUrl = 'https://raw.githubusercontent.com/nefarius/ViGEmBus/master/LICENSE'
+        Source  = 'https://github.com/nefarius/ViGEmBus'
+    },
+    @{
+        Name    = 'HidHide'
+        File    = 'HidHide_1.5.230_x64.exe'
+        Url     = 'https://github.com/nefarius/HidHide/releases/download/v1.5.230.0/HidHide_1.5.230_x64.exe'
+        Sha256  = 'f4bbbcb82e6258641b887c74bc81c4c5f66e4aa811808dfc304347687b7605f6'
+        License = 'MIT'
+        LicenseUrl = 'https://raw.githubusercontent.com/nefarius/HidHide/master/LICENSE'
+        Source  = 'https://github.com/nefarius/HidHide'
+    }
+)
+
+New-Item -ItemType Directory -Force $cache | Out-Null
+if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
+New-Item -ItemType Directory -Force (Join-Path $stage 'redist') | Out-Null
+
+Write-Host '== Compilation de Dualink (release)'
+Push-Location $root
+try { cargo build --release; if ($LASTEXITCODE -ne 0) { throw 'cargo build a échoué' } } finally { Pop-Location }
+Copy-Item (Join-Path $root 'target\release\dualink.exe') $stage
+
+$notices = @(
+    'Dualink embarque les installateurs de composants tiers ci-dessous, redistribués sans modification',
+    'dans le dossier redist\. Leurs textes de licence sont reproduits ici.',
+    ''
+)
+
+foreach ($c in $components) {
+    $cached = Join-Path $cache $c.File
+    if (-not (Test-Path $cached)) {
+        Write-Host "== Téléchargement de $($c.File)"
+        Invoke-WebRequest -Uri $c.Url -OutFile $cached -UseBasicParsing
+    }
+    $hash = (Get-FileHash $cached -Algorithm SHA256).Hash.ToLower()
+    if ($hash -ne $c.Sha256) {
+        Remove-Item $cached -Force
+        throw "Empreinte inattendue pour $($c.File) : $hash (attendu $($c.Sha256))"
+    }
+    Write-Host "   $($c.File) : SHA256 vérifié"
+    Copy-Item $cached (Join-Path $stage 'redist')
+
+    $license = (Invoke-WebRequest -Uri $c.LicenseUrl -UseBasicParsing).Content
+    $notices += ('=' * 78)
+    $notices += "$($c.Name) ($($c.License))  -  $($c.Source)"
+    $notices += "Fichier : redist\$($c.File)  (SHA256 $($c.Sha256))"
+    $notices += ('=' * 78)
+    $notices += $license
+    $notices += ''
+}
+$notices | Set-Content -Encoding UTF8 (Join-Path $stage 'THIRD_PARTY_NOTICES.txt')
+
+Write-Host '== Archive'
+$zip = Join-Path $dist "$name.zip"
+if (Test-Path $zip) { Remove-Item -Force $zip }
+Compress-Archive -Path $stage -DestinationPath $zip
+
+"{0}  {1}" -f (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower(), (Split-Path $zip -Leaf) |
+    Set-Content -Encoding ASCII (Join-Path $dist 'SHA256SUMS.txt')
+
+Write-Host ("Terminé : {0} ({1:N1} Mo)" -f $zip, ((Get-Item $zip).Length / 1MB))
