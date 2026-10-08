@@ -42,5 +42,7 @@ jobs:
           if (-not (Test-Path $notes)) { throw "Texte de release introuvable : $notes" }
           $setup = Get-ChildItem dist/Dualink-Setup-*.exe
           if (-not $setup) { throw "Installateur introuvable dans dist/" }
-          gh release create $env:GITHUB_REF_NAME $setup (Get-ChildItem dist/*.zip) dist/SHA256SUMS.txt `
+          $portable = Get-ChildItem dist/Dualink-v*-windows-x64.exe
+          if (-not $portable) { throw "Application seule introuvable dans dist/" }
+          gh release create $env:GITHUB_REF_NAME $setup $portable dist/SHA256SUMS.txt `
             --title "Dualink $env:GITHUB_REF_NAME" --notes-file $notes --prerelease

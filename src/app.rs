@@ -3,7 +3,7 @@
 use eframe::egui::{self, Color32};
 
 use crate::bridge::{Bridge, Snapshot, Status};
-use crate::deps;
+use crate::deps::{self, Component};
 use crate::hidhide::HidHideState;
 use crate::reset;
 use crate::virtual_pad::Emulation;
@@ -15,6 +15,8 @@ pub struct DualinkApp {
     reset_message: Option<Result<(), String>>,
     /// Résultat de la dernière demande d'installation des composants manquants.
     install_message: Option<Result<(), String>>,
+    /// Des installateurs sont fournis dans `redist\` à côté de l'exécutable.
+    bundled_installers: bool,
 }
 
 impl DualinkApp {
@@ -24,6 +26,7 @@ impl DualinkApp {
             bridge: Bridge::spawn(move || ctx.request_repaint()),
             reset_message: None,
             install_message: None,
+            bundled_installers: deps::has_bundled_installers(),
         }
     }
 }
@@ -62,7 +65,7 @@ impl eframe::App for DualinkApp {
                 ui.weak("Pas de vibration en mode DualShock 4 pour l'instant.");
             }
 
-            show_missing_components(ui, &snapshot, &mut self.install_message);
+            show_installation(ui, &snapshot, &mut self.install_message, self.bundled_installers);
             show_hidhide(ui, &self.bridge, &snapshot.hidhide, &mut self.reset_message);
 
             ui.separator();
@@ -102,47 +105,73 @@ impl eframe::App for DualinkApp {
     }
 }
 
-/// Panneau d'installation en un clic quand ViGEmBus (obligatoire) ou HidHide (optionnel) manque.
-fn show_missing_components(
+/// Section « Installation » : état des composants nécessaires et boutons pour installer ce qui manque.
+fn show_installation(
     ui: &mut egui::Ui,
     snapshot: &Snapshot,
     install_message: &mut Option<Result<(), String>>,
+    bundled_installers: bool,
 ) {
-    let vigem_missing = matches!(snapshot.status, Status::ViGemUnavailable(_));
-    let hidhide_missing = snapshot.hidhide == HidHideState::NotInstalled;
-    if !vigem_missing && !hidhide_missing {
+    let green = Color32::from_rgb(60, 180, 90);
+    let orange = Color32::from_rgb(230, 170, 40);
+    let rows = [
+        (Component::ViGEmBus, "ViGEmBus", "obligatoire : crée les manettes virtuelles", snapshot.vigem_installed),
+        (
+            Component::HidHide,
+            "HidHide",
+            "recommandé : masque la vraie manette aux autres applications",
+            snapshot.hidhide != HidHideState::NotInstalled,
+        ),
+    ];
+    let missing: Vec<Component> = rows.iter().filter(|row| !row.3).map(|row| row.0).collect();
+    if missing.is_empty() {
         *install_message = None;
-        return;
     }
 
-    let mut missing = Vec::new();
-    if vigem_missing {
-        missing.push("ViGEmBus (obligatoire)");
-    }
-    if hidhide_missing {
-        missing.push("HidHide (optionnel, pour masquer la vraie manette)");
-    }
-
-    ui.group(|ui| {
-        ui.label(format!("Composants manquants : {}", missing.join(", ")));
-        ui.horizontal(|ui| {
-            if ui.button("Installer en un clic").clicked() {
-                *install_message = Some(deps::request_install());
-            }
-            match install_message {
-                Some(Ok(())) => {
-                    ui.weak("Installation en cours (via winget), patientez quelques instants...");
+    egui::CollapsingHeader::new("Installation").default_open(!missing.is_empty()).show(ui, |ui| {
+        egui::Grid::new("components").num_columns(3).spacing([12.0, 4.0]).show(ui, |ui| {
+            for (component, name, role, installed) in rows {
+                ui.vertical(|ui| {
+                    ui.strong(name);
+                    ui.weak(role);
+                });
+                if installed {
+                    ui.colored_label(green, "Installé");
+                } else {
+                    ui.colored_label(orange, "Manquant");
+                    if ui.button("Installer").clicked() {
+                        *install_message = Some(deps::request_install(&[component]));
+                    }
                 }
-                Some(Err(e)) => {
-                    ui.colored_label(Color32::from_rgb(210, 70, 70), e.as_str());
-                }
-                None => {}
+                ui.end_row();
             }
         });
-        ui.weak("Une invite d'autorisation Windows s'affichera. Un redémarrage peut être demandé par HidHide.");
+
+        if missing.len() > 1 && ui.button("Tout installer").clicked() {
+            *install_message = Some(deps::request_install(&missing));
+        }
+
+        match install_message {
+            Some(Ok(())) => {
+                ui.weak("Installation demandée : acceptez l'invite Windows puis patientez, l'état se met à jour tout seul.");
+            }
+            Some(Err(e)) => {
+                ui.colored_label(Color32::from_rgb(210, 70, 70), e.as_str());
+            }
+            None => {}
+        }
+
+        ui.weak(if bundled_installers {
+            "Source : installateurs fournis avec Dualink (aucune connexion Internet nécessaire)."
+        } else {
+            "Source : installateurs officiels téléchargés depuis GitHub (SHA256 vérifié), ou winget en secours. Connexion Internet nécessaire."
+        });
+        ui.weak("Une invite d'autorisation Windows s'affichera. HidHide peut demander un redémarrage.");
+        if let Some(log) = deps::log_path() {
+            ui.weak(format!("Journal : {}", log.display()));
+        }
     });
 }
-
 /// Case « masquer la DualSense » et état de HidHide.
 fn show_hidhide(
     ui: &mut egui::Ui,

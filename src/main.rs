@@ -19,7 +19,10 @@ fn main() -> eframe::Result {
     // Copies élevées lancées par l'interface (invite UAC) : pas de fenêtre.
     match std::env::args().nth(1).as_deref() {
         Some(reset::RESET_ARG) => std::process::exit(reset::run_elevated_helper()),
-        Some(deps::INSTALL_ARG) => std::process::exit(deps::run_elevated_helper()),
+        Some(deps::INSTALL_ARG) => {
+            let list = std::env::args().nth(2).unwrap_or_default();
+            std::process::exit(deps::run_elevated_helper(&list));
+        }
         _ => {}
     }
 

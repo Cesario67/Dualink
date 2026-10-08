@@ -33,7 +33,10 @@ accès déjà pris.
 
 ## Installation (utilisateurs)
 
-Téléchargez `Dualink-Setup-v<version>.exe` depuis les [releases](https://github.com/Cesario67/Dualink/releases) et lancez-le. Il vérifie ViGEmBus (obligatoire) et HidHide (recommandé), installe ceux qui manquent à partir des installateurs officiels qu'il embarque (aucune connexion Internet nécessaire), puis installe Dualink avec ses raccourcis et un désinstalleur. À la désinstallation, Dualink est retiré de la liste de HidHide ; les pilotes restent en place.
+Chaque [release](https://github.com/Cesario67/Dualink/releases) propose deux fichiers au choix :
+
+- **`Dualink-Setup-v<version>.exe`** : l'installateur. Il vérifie ViGEmBus (obligatoire) et HidHide (recommandé), installe ceux qui manquent à partir des installateurs officiels qu'il embarque (aucune connexion Internet nécessaire), puis installe Dualink avec ses raccourcis et un désinstalleur. À la désinstallation, Dualink est retiré de la liste de HidHide ; les pilotes restent en place.
+- **`Dualink-v<version>-windows-x64.exe`** : l'application seule, à lancer directement. Sa section « Installation » (voir plus bas) permet d'installer ViGEmBus et HidHide s'ils manquent.
 
 Le runtime Visual C++ n'est **pas** nécessaire : l'exécutable est compilé avec le runtime C intégré (`.cargo/config.toml`).
 
@@ -47,27 +50,37 @@ Le runtime Visual C++ n'est **pas** nécessaire : l'exécutable est compilé ave
 | Un pilote graphique avec OpenGL | Affichage de la fenêtre (egui) ; une machine virtuelle sans accélération peut poser problème | oui |
 | Rust (édition 2024) | Uniquement pour compiler depuis les sources | non |
 
-### Installation de ViGEmBus et HidHide en un clic
+### Section « Installation » de l'application
 
-Si l'un des deux manque, Dualink affiche un panneau « Composants manquants » avec un bouton
-**Installer en un clic**. Il lance une copie de Dualink avec les droits administrateur (une seule
-invite d'autorisation Windows), qui installe ce qui manque en silencieux :
+La fenêtre contient une section **Installation** (ouverte automatiquement quand un composant manque).
+Elle affiche l'état de ViGEmBus et de HidHide (Installé / Manquant, vérifié en continu) avec un bouton
+**Installer** par composant et **Tout installer**. Un clic lance une copie de Dualink avec les droits
+administrateur (une seule invite d'autorisation Windows), qui installe en silencieux, dans l'ordre :
 
-1. depuis le dossier `redist\` situé à côté de `dualink.exe` s'il existe (archive de release :
-   **aucune connexion Internet nécessaire**) ;
-2. sinon via `winget` (présent sur Windows 10/11 récents) : `ViGEm.ViGEmBus` et `Nefarius.HidHide`.
+1. l'installateur du dossier `redist\` à côté de `dualink.exe`, s'il existe (hors ligne) ;
+2. sinon l'installateur officiel téléchargé depuis GitHub avec `curl.exe` (fourni avec Windows 10/11),
+   dont le **SHA256 est vérifié** avant exécution (connexion Internet nécessaire) ;
+3. en dernier recours `winget` : `ViGEm.ViGEmBus` et `Nefarius.HidHide`.
 
-Dualink détecte ensuite tout seul l'installation terminée. HidHide peut demander un redémarrage. Les
-traces sont dans `%LOCALAPPDATA%\Dualink\install.log`. Sans `redist\` ni winget, installez les
-composants à la main depuis les liens ci-dessus.
+L'état se met à jour tout seul une fois l'installation terminée. HidHide peut demander un
+redémarrage. Les traces sont dans `%LOCALAPPDATA%\Dualink\install.log`. Les URL et empreintes sont
+dans `src/deps.rs` (et dans `scripts/package-release.ps1` pour l'installateur).
 
 ## Construire les fichiers de release
 
-`scripts\package-release.ps1` construit dans `dist\` : l'installateur `Dualink-Setup-v<version>.exe`(script Inno Setup dans `installer\dualink.iss`, nécessite [Inno Setup 6](https://jrsoftware.org/isinfo.php)), l'archive portable `Dualink-v<version>-windows-x64.zip` (`dualink.exe`, `redist\` avec les installateurs ViGEmBus 1.22.0 et HidHide 1.5.230 téléchargés depuis les dépôts officiels et vérifiés par leur SHA256, `THIRD_PARTY_NOTICES.txt` avec les licences BSD-3-Clause et MIT) et `SHA256SUMS.txt`. Sans Inno Setup, seule l'archive est produite.
+`scripts\package-release.ps1` construit dans `dist\` :
+
+- `Dualink-Setup-v<version>.exe` : l'installateur (script Inno Setup dans `installer\dualink.iss`, nécessite [Inno Setup 6](https://jrsoftware.org/isinfo.php)). Il embarque les installateurs ViGEmBus 1.22.0 et HidHide 1.5.230, téléchargés depuis les dépôts officiels et vérifiés par leur SHA256, et leurs licences (BSD-3-Clause et MIT) ;
+- `Dualink-v<version>-windows-x64.exe` : l'application seule ;
+- `SHA256SUMS.txt`.
+
+Sans Inno Setup, seule l'application seule est produite.
 
 ```bash
-powershell -ExecutionPolicy Bypass -File scripts\package-release.ps1 -Version 0.1.0
+powershell -ExecutionPolicy Bypass -File scripts\package-release.ps1
 ```
+
+La version est celle de `Cargo.toml` (ou `-Version x.y.z`).
 
 Pour mettre à jour un composant, changez l'URL et l'empreinte dans le script. Le dossier `dist\` n'est
 pas versionné. Un tag `vX.Y.Z` (qui doit correspondre à la version de `Cargo.toml`) déclenche le workflow `.github/workflows/release.yml`, qui construit et publie la release.

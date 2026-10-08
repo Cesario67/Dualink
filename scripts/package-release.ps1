@@ -1,13 +1,13 @@
 ﻿# Construit les fichiers de release de Dualink dans dist\ :
 #   Dualink-Setup-v<version>.exe          installateur (Inno Setup) : vérifie et installe ViGEmBus / HidHide
-#   Dualink-v<version>-windows-x64.zip    version portable : dualink.exe, redist\, licences
+#   Dualink-v<version>-windows-x64.exe    l'application seule (dualink.exe), sans installateur
 #   SHA256SUMS.txt
 #
 # Les installateurs ViGEmBus et HidHide sont téléchargés depuis les dépôts officiels et vérifiés par
 # leur SHA256 (empreintes de leurs manifestes winget). Rien d'autre n'est modifié sur la machine.
 #
 # Utilisation : powershell -ExecutionPolicy Bypass -File scripts\package-release.ps1 [-Version <x.y.z>]
-#   (par défaut : la version de Cargo.toml). Si Inno Setup (ISCC.exe) est absent, seul le zip est construit.
+#   (par défaut : la version de Cargo.toml). Si Inno Setup (ISCC.exe) est absent, seule l'application seule est construite.
 
 param([string]$Version = '')
 
@@ -17,7 +17,7 @@ if (-not $Version) { $Version = (Select-String -Path (Join-Path $root 'Cargo.tom
 $dist  = Join-Path $root 'dist'
 $cache = Join-Path $dist 'cache'
 $name  = "Dualink-v$Version-windows-x64"
-$stage = Join-Path $dist $name
+$stage = Join-Path $dist "stage-v$Version"
 
 $components = @(
     @{
@@ -79,10 +79,9 @@ foreach ($c in $components) {
 }
 $notices | Set-Content -Encoding UTF8 (Join-Path $stage 'THIRD_PARTY_NOTICES.txt')
 
-Write-Host '== Archive portable'
-$zip = Join-Path $dist "$name.zip"
-if (Test-Path $zip) { Remove-Item -Force $zip }
-Compress-Archive -Path $stage -DestinationPath $zip
+Write-Host '== Application seule'
+$portable = Join-Path $dist "$name.exe"
+Copy-Item (Join-Path $stage 'dualink.exe') $portable -Force
 
 # Installateur : Inno Setup (ISCC.exe), dans le PATH ou à un emplacement d'installation habituel.
 $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
@@ -102,16 +101,16 @@ if ($iscc) {
     & $iscc "/DAppVersion=$Version" "/DStageDir=$stage" "/DViGEmFile=$($components[0].File)" "/DHidHideFile=$($components[1].File)" (Join-Path $root 'installer\dualink.iss')
     if ($LASTEXITCODE -ne 0) { throw "ISCC a échoué (code $LASTEXITCODE)" }
 } else {
-    Write-Warning 'Inno Setup (ISCC.exe) introuvable : installateur non construit, seul le zip est produit.'
+    Write-Warning 'Inno Setup (ISCC.exe) introuvable : installateur non construit, seule l''application seule est produite.'
 }
 
 $sums = @()
-foreach ($file in @($setup, $zip)) {
+foreach ($file in @($setup, $portable)) {
     if (Test-Path $file) { $sums += "{0}  {1}" -f (Get-FileHash $file -Algorithm SHA256).Hash.ToLower(), (Split-Path $file -Leaf) }
 }
 $sums | Set-Content -Encoding ASCII (Join-Path $dist 'SHA256SUMS.txt')
 
 Write-Host ''
-foreach ($file in @($setup, $zip)) {
+foreach ($file in @($setup, $portable)) {
     if (Test-Path $file) { Write-Host ("Terminé : {0} ({1:N1} Mo)" -f $file, ((Get-Item $file).Length / 1MB)) }
 }

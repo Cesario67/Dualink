@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 
 use hidapi::HidApi;
 
+use crate::deps::Component;
 use crate::dualsense::{DualSense, DualSenseState};
 use crate::hidhide::{HidHide, HidHideState};
 use crate::virtual_pad::{Emulation, VirtualPad};
@@ -30,6 +31,8 @@ pub struct Snapshot {
     pub status: Status,
     pub input: DualSenseState,
     pub hidhide: HidHideState,
+    /// ViGEmBus est installé et accessible (indépendant de la présence d'une manette).
+    pub vigem_installed: bool,
 }
 
 struct Shared {
@@ -59,6 +62,7 @@ impl Bridge {
                 status: Status::WaitingForController,
                 input: DualSenseState::default(),
                 hidhide: HidHideState::Off,
+                vigem_installed: true,
             }),
             enabled: AtomicBool::new(true),
             hide_wanted: AtomicBool::new(true),
@@ -113,6 +117,7 @@ struct Hider {
     hidhide: Option<HidHide>,
     wanted: bool,
     state: HidHideState,
+    vigem_installed: bool,
     last_detection: Instant,
 }
 
@@ -122,6 +127,7 @@ impl Hider {
             hidhide: None,
             wanted: false,
             state: HidHideState::NotInstalled,
+            vigem_installed: Component::ViGEmBus.is_installed(),
             last_detection: Instant::now(),
         };
         hider.detect();
@@ -141,10 +147,15 @@ impl Hider {
         };
     }
 
-    /// Tant que HidHide est absent, le cherche de temps en temps : l'utilisateur peut l'installer
-    /// pendant que Dualink tourne.
+    /// Revérifie de temps en temps la présence de ViGEmBus et de HidHide : l'utilisateur peut les
+    /// installer pendant que Dualink tourne.
     fn poll_installation(&mut self) {
-        if self.hidhide.is_none() && self.last_detection.elapsed() >= DETECTION_INTERVAL {
+        if self.last_detection.elapsed() < DETECTION_INTERVAL {
+            return;
+        }
+        self.last_detection = Instant::now();
+        self.vigem_installed = Component::ViGEmBus.is_installed();
+        if self.hidhide.is_none() {
             self.detect();
         }
     }
@@ -173,7 +184,7 @@ impl Hider {
 
 /// Met à jour l'état partagé et ne notifie que si quelque chose a changé.
 fn publish(shared: &Shared, notify: &dyn Fn(), hider: &Hider, status: Status, input: DualSenseState) {
-    let next = Snapshot { status, input, hidhide: hider.state.clone() };
+    let next = Snapshot { status, input, hidhide: hider.state.clone(), vigem_installed: hider.vigem_installed };
     {
         let mut current = shared.lock();
         if *current == next {
